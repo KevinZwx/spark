@@ -17,13 +17,12 @@
 
 package org.apache.spark.sql.catalyst.expressions
 
-import java.net.{URI, URISyntaxException}
+import java.net.{URI, URISyntaxException, URLDecoder, URLEncoder}
 import java.text.{BreakIterator, DecimalFormat, DecimalFormatSymbols}
 import java.util.{HashMap, Locale, Map => JMap}
 import java.util.regex.Pattern
 
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.expressions.codegen._
@@ -1269,9 +1268,23 @@ case class ParseUrl(children: Seq[Expression])
 
   private def getUrl(url: UTF8String): URI = {
     try {
-      new URI(url.toString)
+      if (url.toString.split('?').length > 1) {
+        val Array(url_host, url_query, _*) = url.toString.trim.split('?')
+        val url_encode = URLEncoder.encode(url_host, "utf-8").replaceAll("%3A", ":")
+          .replaceAll("%2F", "/") + "?" + URLEncoder.encode(url_query, "utf-8")
+        new URI(url_encode)
+      } else {
+        new URI(url.toString.trim)
+      }
     } catch {
-      case e: URISyntaxException => null
+      case e: URISyntaxException =>
+        print("URISyntaxException:" + url.toString)
+        e.printStackTrace()
+        null
+      case e: Exception =>
+        print("url.toString:" + url.toString)
+        e.printStackTrace()
+        null
     }
   }
 
@@ -1291,8 +1304,16 @@ case class ParseUrl(children: Seq[Expression])
 
     partToExtract match {
       case HOST => _.getHost
-      case PATH => _.getRawPath
-      case QUERY => _.getRawQuery
+      case PATH => (url: URI) =>
+        if (url ne null) {
+          if (url.getRawPath ne null) URLDecoder.decode(url.getRawPath, "utf-8")
+          else null
+        } else null
+      case QUERY => (url: URI) =>
+        if (url ne null) {
+          if (url.getQuery ne null ) URLDecoder.decode(url.getRawQuery, "utf-8")
+          else null
+        } else null
       case REF => _.getRawFragment
       case PROTOCOL => _.getScheme
       case FILE =>
